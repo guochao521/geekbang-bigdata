@@ -1,12 +1,8 @@
 package com.geekbang.bigdata.hotitems_analysis
 
 
-import java.sql.Timestamp
-import java.util.Properties
 import org.apache.flink.api.common.functions.AggregateFunction
-import org.apache.flink.api.common.serialization.SimpleStringSchema
 import org.apache.flink.api.common.state.{ListState, ListStateDescriptor}
-import org.apache.flink.api.java.tuple.{Tuple, Tuple1, Tuple2}
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
@@ -14,9 +10,10 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.WindowFunction
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer
 import org.apache.flink.util.Collector
 
+import java.sql.Timestamp
+import java.util.Properties
 import scala.collection.mutable.ListBuffer
 
 // 定义输入数据的样例类
@@ -45,6 +42,7 @@ object HotItems {
     val dataStream =
     stream.map(data => {
         val dataArray = data.split(",")
+        // 将数据封装到新建的样例类中
         UserBehavior(dataArray(0).trim.toLong, dataArray(1).trim.toLong, dataArray(2).trim.toInt, dataArray(3).trim, dataArray(4).trim.toLong)
       })
       .assignAscendingTimestamps(_.timestamp * 1000L)
@@ -105,6 +103,12 @@ class AverageAgg() extends AggregateFunction[UserBehavior, (Long, Int), Double] 
 // 自定义窗口函数，输出ItemViewCount
 class WindowResult() extends WindowFunction[Long, ItemViewCount, Long, TimeWindow] {
   override def apply(key: Long, window: TimeWindow, input: Iterable[Long], out: Collector[ItemViewCount]): Unit = {
+    /**
+     * 1. 在前面的步骤中，我们根据商品 id 进行了分组，次数的「 key 」 就是商品编号
+     * 2. window.getEnd 获取窗口末尾
+     * 3. input.iterator.next() 获取点击数大小 【累加器统计的结果】
+     */
+    // 将获取到的结果进行上传
     out.collect(ItemViewCount(key, window.getEnd, input.iterator.next()))
   }
 }
@@ -112,9 +116,12 @@ class WindowResult() extends WindowFunction[Long, ItemViewCount, Long, TimeWindo
 // 自定义的处理函数
 class TopNHotItems(topSize: Int) extends KeyedProcessFunction[Long, ItemViewCount, String] {
 
+  // 定义一个状态变量 list state，用来保存所有的 ItemViewCount
   private var itemState: ListState[ItemViewCount] = _
 
+  // 在执行 precessElement 方法之前，会最先执行并且只执行一次 open 方法
   override def open(parameters: Configuration): Unit = {
+    // 初始化 item 变量
     itemState = getRuntimeContext.getListState(new ListStateDescriptor[ItemViewCount]("item-state", classOf[ItemViewCount]))
   }
 
